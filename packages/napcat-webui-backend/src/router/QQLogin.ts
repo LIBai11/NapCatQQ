@@ -3,6 +3,7 @@ import { Router } from 'express';
 import {
   QQCheckLoginStatusHandler,
   QQGetQRcodeHandler,
+  QQGetQRcodeImageHandler,
   QQGetQuickLoginListHandler,
   QQSetQuickLoginHandler,
   QQGetLoginListNewHandler,
@@ -20,6 +21,9 @@ router.all('/GetQuickLoginListNew', QQGetLoginListNewHandler);
 router.post('/CheckLoginStatus', QQCheckLoginStatusHandler);
 // router:获取QQ登录二维码
 router.post('/GetQQLoginQrcode', QQGetQRcodeHandler);
+// router:获取QQ登录二维码图片 (Base64或PNG)
+router.get('/GetQRCodeImage', QQGetQRcodeImageHandler);
+router.post('/GetQRCodeImage', QQGetQRcodeImageHandler);
 // router:设置QQ快速登录
 router.post('/SetQuickLogin', QQSetQuickLoginHandler);
 // router:获取QQ登录信息

@@ -1,9 +1,11 @@
 import { RequestHandler } from 'express';
+import fs from 'fs';
+import path from 'path';
 
 import { WebUiDataRuntime } from '@/napcat-webui-backend/src/helper/Data';
 import { isEmpty } from '@/napcat-webui-backend/src/utils/check';
 import { sendError, sendSuccess } from '@/napcat-webui-backend/src/utils/response';
-import { WebUiConfig } from '@/napcat-webui-backend/index';
+import { WebUiConfig, webUiPathWrapper } from '@/napcat-webui-backend/index';
 
 // 获取QQ登录二维码
 export const QQGetQRcodeHandler: RequestHandler = async (_, res) => {
@@ -23,6 +25,53 @@ export const QQGetQRcodeHandler: RequestHandler = async (_, res) => {
     qrcode: qrcodeUrl,
   };
   return sendSuccess(res, data);
+};
+
+// 获取QQ登录二维码图片 (Base64或PNG流)
+export const QQGetQRcodeImageHandler: RequestHandler = async (req, res) => {
+  // 判断是否已经登录
+  if (WebUiDataRuntime.getQQLoginStatus()) {
+    return sendError(res, 'QQ Is Logined');
+  }
+
+  // 获取二维码URL (用于检查是否已生成)
+  const qrcodeUrl = WebUiDataRuntime.getQQLoginQrcodeURL();
+  if (isEmpty(qrcodeUrl)) {
+    return sendError(res, 'QRCode Not Generated Yet');
+  }
+
+  // 读取二维码图片文件
+  const qrcodePath = path.join(webUiPathWrapper.cachePath, 'qrcode.png');
+
+  if (!fs.existsSync(qrcodePath)) {
+    return sendError(res, 'QRCode Image File Not Found');
+  }
+
+  try {
+    const format = req.query.format as string || 'base64';
+
+    if (format === 'png') {
+      // 直接返回PNG图片流
+      const imageBuffer = fs.readFileSync(qrcodePath);
+      res.setHeader('Content-Type', 'image/png');
+      res.setHeader('Content-Length', imageBuffer.length);
+      return res.send(imageBuffer);
+    } else {
+      // 返回Base64编码的JSON
+      const imageBuffer = fs.readFileSync(qrcodePath);
+      const base64Image = imageBuffer.toString('base64');
+      const timestamp = WebUiDataRuntime.getQQLoginQrcodeTimestamp();
+
+      return sendSuccess(res, {
+        image: base64Image,
+        url: qrcodeUrl,
+        timestamp: timestamp,
+        expiresIn: 120, // 二维码大约2分钟有效期
+      });
+    }
+  } catch (error) {
+    return sendError(res, 'Failed to read QRCode image: ' + (error as Error).message);
+  }
 };
 
 // 获取QQ登录状态

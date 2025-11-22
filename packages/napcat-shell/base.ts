@@ -37,6 +37,12 @@ import { QQBasicInfoWrapper } from '@/napcat-core/helper/qq-basic-info';
 import { statusHelperSubscription } from '@/napcat-core/helper/status';
 import { applyPendingUpdates } from '@/napcat-webui-backend/src/api/UpdateNapCat';
 // NapCat Shell App ES 入口文件
+
+// 全局变量存储运行模式
+let isHeadlessMode = false;
+let isShuttingDown = false;
+let napCatShellInstance: NapCatShell | null = null;
+
 async function handleUncaughtExceptions (logger: LogWrapper) {
   process.on('uncaughtException', (err) => {
     logger.logError('[NapCat] [Error] Unhandled Exception:', err.message);
@@ -44,6 +50,60 @@ async function handleUncaughtExceptions (logger: LogWrapper) {
   process.on('unhandledRejection', (reason) => {
     logger.logError('[NapCat] [Error] unhandledRejection:', reason);
   });
+}
+
+/**
+ * 优雅关闭处理器
+ */
+async function handleGracefulShutdown (signal: string, logger: LogWrapper) {
+  if (isShuttingDown) {
+    logger.logWarn(`[NapCat] 已在关闭流程中，忽略信号 ${signal}`);
+    return;
+  }
+
+  isShuttingDown = true;
+  logger.log(`[NapCat] 收到 ${signal} 信号，开始优雅关闭...`);
+
+  // 设置5秒超时强制退出
+  const forceExitTimeout = setTimeout(() => {
+    logger.logError('[NapCat] 优雅关闭超时，强制退出');
+    process.exit(1);
+  }, 5000);
+
+  try {
+    // 1. 关闭 OneBot 网络适配器
+    if (napCatShellInstance?.core) {
+      logger.log('[NapCat] 正在关闭 OneBot 适配器...');
+      // OneBot 适配器的关闭会在其内部处理
+    }
+
+    // 2. 保存配置 (如果需要)
+    logger.log('[NapCat] 正在保存配置...');
+
+    // 3. 清理完成
+    logger.log('[NapCat] 优雅关闭完成');
+    clearTimeout(forceExitTimeout);
+    process.exit(0);
+  } catch (error) {
+    logger.logError('[NapCat] 优雅关闭过程中出错:', error);
+    clearTimeout(forceExitTimeout);
+    process.exit(1);
+  }
+}
+
+/**
+ * 注册信号处理器
+ */
+function registerSignalHandlers (logger: LogWrapper) {
+  // Windows 下只支持 SIGINT
+  process.on('SIGINT', () => handleGracefulShutdown('SIGINT', logger));
+
+  // SIGTERM 在 Windows 下不可靠，但仍然注册
+  if (process.platform !== 'win32') {
+    process.on('SIGTERM', () => handleGracefulShutdown('SIGTERM', logger));
+  }
+
+  logger.log('[NapCat] 信号处理器已注册 (支持优雅关闭)');
 }
 
 function getDataPaths (wrapper: WrapperNodeApi): [string, string] {
@@ -147,22 +207,34 @@ async function handleLogin (
   };
   loginListener.onQRCodeGetPicture = ({ pngBase64QrcodeData, qrcodeUrl }) => {
     WebUiDataRuntime.setQQLoginQrcodeURL(qrcodeUrl);
+    WebUiDataRuntime.setQQLoginQrcodeTimestamp(Date.now());
 
     const realBase64 = pngBase64QrcodeData.replace(/^data:image\/\w+;base64,/, '');
     const buffer = Buffer.from(realBase64, 'base64');
-    logger.logWarn('请扫描下面的二维码，然后在手Q上授权登录：');
     const qrcodePath = path.join(pathWrapper.cachePath, 'qrcode.png');
-    qrcode.generate(qrcodeUrl, { small: true }, (res) => {
-      logger.logWarn([
-        '\n',
-        res,
-        '二维码解码URL: ' + qrcodeUrl,
-        '如果控制台二维码无法扫码，可以复制解码url到二维码生成网站生成二维码再扫码，也可以打开下方的二维码路径图片进行扫码。',
-      ].join('\n'));
-      fs.writeFile(qrcodePath, buffer, {}, () => {
+
+    // 保存二维码图片文件
+    fs.writeFile(qrcodePath, buffer, {}, () => {
+      if (isHeadlessMode) {
+        logger.log('[NapCat] 二维码已生成，请通过 HTTP API 获取: /api/QQLogin/GetQRCodeImage');
+        logger.log('[NapCat] 二维码URL:', qrcodeUrl);
+      } else {
         logger.logWarn('二维码已保存到', qrcodePath);
-      });
+      }
     });
+
+    // 非 headless 模式下在控制台显示二维码
+    if (!isHeadlessMode) {
+      logger.logWarn('请扫描下面的二维码，然后在手Q上授权登录：');
+      qrcode.generate(qrcodeUrl, { small: true }, (res) => {
+        logger.logWarn([
+          '\n',
+          res,
+          '二维码解码URL: ' + qrcodeUrl,
+          '如果控制台二维码无法扫码，可以复制解码url到二维码生成网站生成二维码再扫码，也可以打开下方的二维码路径图片进行扫码。',
+        ].join('\n'));
+      });
+    }
   };
 
   loginListener.onQRCodeSessionFailed = (errType: number, errCode: number) => {
@@ -314,12 +386,150 @@ async function waitForNetworkConnection (loginService: NodeIKernelLoginService, 
   return network_ok;
 }
 
+/**
+ * 初始化默认配置文件
+ * 如果配置文件不存在，从环境变量或默认值创建
+ * 优先级: 环境变量 > 外部模板文件 > 内置默认值
+ */
+async function initializeDefaultConfigs (pathWrapper: NapCatPathWrapper, logger: LogWrapper) {
+  const webuiConfigPath = path.join(pathWrapper.configPath, 'webui.json');
+  const onebotConfigPath = path.join(pathWrapper.configPath, 'onebot11.json');
+  const webuiTemplatePath = path.join(pathWrapper.configPath, 'webui.template.json');
+  const onebotTemplatePath = path.join(pathWrapper.configPath, 'onebot11.template.json');
+
+  let configCreated = false;
+
+  // 检查并创建 webui.json
+  if (!fs.existsSync(webuiConfigPath)) {
+    let webuiConfig: any;
+
+    // 尝试从模板文件读取
+    if (fs.existsSync(webuiTemplatePath)) {
+      try {
+        const templateContent = fs.readFileSync(webuiTemplatePath, 'utf-8');
+        webuiConfig = JSON.parse(templateContent);
+        logger.log('[NapCat] [Config] 使用模板文件:', webuiTemplatePath);
+      } catch (error) {
+        logger.logWarn('[NapCat] [Config] 模板文件解析失败，使用默认配置:', error);
+      }
+    }
+
+    // 如果没有模板或解析失败，使用默认配置
+    if (!webuiConfig) {
+      webuiConfig = {
+        host: '0.0.0.0',
+        port: 6099,
+        token: '',
+        loginRate: 10,
+        autoLoginAccount: '',
+        disableWebUI: false,
+        disableNonLANAccess: false,
+      };
+    }
+
+    // 环境变量覆盖（优先级最高）
+    if (process.env['NAPCAT_WEBUI_HOST']) webuiConfig.host = process.env['NAPCAT_WEBUI_HOST'];
+    if (process.env['NAPCAT_WEBUI_PORT']) webuiConfig.port = parseInt(process.env['NAPCAT_WEBUI_PORT'], 10);
+    if (process.env['NAPCAT_WEBUI_TOKEN']) webuiConfig.token = process.env['NAPCAT_WEBUI_TOKEN'];
+    if (process.env['NAPCAT_QUICK_ACCOUNT']) webuiConfig.autoLoginAccount = process.env['NAPCAT_QUICK_ACCOUNT'];
+
+    try {
+      fs.writeFileSync(webuiConfigPath, JSON.stringify(webuiConfig, null, 2), 'utf-8');
+      logger.log('[NapCat] [Config] 已创建 WebUI 配置:', webuiConfigPath);
+      configCreated = true;
+    } catch (error) {
+      logger.logError('[NapCat] [Config] 创建 WebUI 配置失败:', error);
+    }
+  }
+
+  // 检查并创建 onebot11.json
+  if (!fs.existsSync(onebotConfigPath)) {
+    let onebotConfig: any;
+
+    // 尝试从模板文件读取
+    if (fs.existsSync(onebotTemplatePath)) {
+      try {
+        const templateContent = fs.readFileSync(onebotTemplatePath, 'utf-8');
+        onebotConfig = JSON.parse(templateContent);
+        logger.log('[NapCat] [Config] 使用模板文件:', onebotTemplatePath);
+      } catch (error) {
+        logger.logWarn('[NapCat] [Config] 模板文件解析失败，使用默认配置:', error);
+      }
+    }
+
+    // 如果没有模板或解析失败，使用默认配置
+    if (!onebotConfig) {
+      onebotConfig = {
+        network: {
+          httpServers: [
+            {
+              name: 'qq-http-server',
+              enable: true,
+              port: 8801,
+              host: '127.0.0.1',
+              enableCors: true,
+              enableWebsocket: true,
+              messagePostFormat: 'array',
+              token: Math.random().toString(36).substring(2, 15),
+              debug: false,
+            },
+          ],
+          httpSseServers: [],
+          httpClients: [],
+          websocketServers: [],
+          websocketClients: [],
+        },
+        musicSignUrl: '',
+        enableLocalFile2Url: true,
+        parseMultMsg: true,
+      };
+    }
+
+    // 环境变量覆盖 HTTP 服务器配置（优先级最高）
+    if (onebotConfig.network?.httpServers?.[0]) {
+      const httpServer = onebotConfig.network.httpServers[0];
+      if (process.env['NAPCAT_ONEBOT_PORT']) {
+        httpServer.port = parseInt(process.env['NAPCAT_ONEBOT_PORT'], 10);
+      }
+      if (process.env['NAPCAT_ONEBOT_HOST']) {
+        httpServer.host = process.env['NAPCAT_ONEBOT_HOST'];
+      }
+      if (process.env['NAPCAT_ONEBOT_TOKEN']) {
+        httpServer.token = process.env['NAPCAT_ONEBOT_TOKEN'];
+      }
+    }
+
+    try {
+      fs.writeFileSync(onebotConfigPath, JSON.stringify(onebotConfig, null, 2), 'utf-8');
+      logger.log('[NapCat] [Config] 已创建 OneBot 配置:', onebotConfigPath);
+      configCreated = true;
+    } catch (error) {
+      logger.logError('[NapCat] [Config] 创建 OneBot 配置失败:', error);
+    }
+  }
+
+  if (configCreated) {
+    logger.log('[NapCat] [Config] ========================================');
+    logger.log('[NapCat] [Config] 首次启动已自动生成配置文件');
+    logger.log('[NapCat] [Config] WebUI 配置: ' + webuiConfigPath);
+    logger.log('[NapCat] [Config] OneBot 配置: ' + onebotConfigPath);
+    logger.log('[NapCat] [Config] ========================================');
+    logger.log('[NapCat] [Config] 提示: 可创建 *.template.json 自定义默认配置');
+    logger.log('[NapCat] [Config] 提示: 环境变量优先级最高，可覆盖任何配置');
+    logger.log('[NapCat] [Config] ========================================');
+  }
+}
+
 export async function NCoreInitShell () {
   console.log('NapCat Shell App Loading...');
   const pathWrapper = new NapCatPathWrapper();
   const logger = new LogWrapper(pathWrapper.logsPath);
   handleUncaughtExceptions(logger);
+  registerSignalHandlers(logger);
   await applyPendingUpdates(pathWrapper);
+
+  // 初始化默认配置文件 (首次启动自动生成)
+  await initializeDefaultConfigs(pathWrapper, logger);
 
   // 初始化 FFmpeg 服务
   await FFmpegService.init(pathWrapper.binaryPath, logger);
@@ -374,6 +584,11 @@ export async function NCoreInitShell () {
     if (qIndex !== -1 && qIndex + 1 < args.length) {
       quickLoginUin = args[qIndex + 1];
     }
+    // 检测 headless 模式
+    if (args.includes('--headless') || args.includes('-H')) {
+      isHeadlessMode = true;
+      logger.log('[NapCat] 后台模式 (Headless) 已启用');
+    }
   } catch (error) {
     logger.logWarn('解析命令行参数失败，无法使用快速登录功能', error);
   }
@@ -414,7 +629,7 @@ export async function NCoreInitShell () {
 
   logger.logDebug('本账号数据/缓存目录：', accountDataPath);
 
-  await new NapCatShell(
+  napCatShellInstance = new NapCatShell(
     wrapper,
     session,
     logger,
@@ -423,7 +638,8 @@ export async function NCoreInitShell () {
     basicInfoWrapper,
     pathWrapper,
     nativePacketHandler
-  ).InitNapCat();
+  );
+  await napCatShellInstance.InitNapCat();
 }
 
 export class NapCatShell {

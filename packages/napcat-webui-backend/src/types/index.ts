@@ -41,6 +41,7 @@ export interface LoginRuntimeType {
   LoginCurrentRate: number;
   QQLoginStatus: boolean;
   QQQRCodeURL: string;
+  QQQRCodeTimestamp: number;
   QQLoginUin: string;
   QQLoginInfo: SelfInfo;
   QQVersion: string;

@@ -1,0 +1,32 @@
+{
+  "_comment": "WebUI 配置模板 - 将此文件放到 config/ 目录下即可自定义默认配置",
+  "_usage": "首次启动时，如果 config/webui.json 不存在，会从此模板生成",
+  "_priority": "环境变量 > 模板文件 > 内置默认值",
+  "host": "0.0.0.0",
+  "port": 6099,
+  "token": "",
+  "loginRate": 10,
+  "autoLoginAccount": "",
+  "disableWebUI": false,
+  "disableNonLANAccess": false,
+  "_field_descriptions": {
+    "host": "WebUI 监听地址 - 0.0.0.0 允许外部访问，127.0.0.1 仅本地访问",
+    "port": "WebUI 监听端口",
+    "token": "WebUI 访问令牌 - 留空则自动生成随机 token",
+    "loginRate": "登录速率限制 - 每分钟最多允许的登录尝试次数",
+    "autoLoginAccount": "自动登录 QQ 号 - 启动时自动快速登录",
+    "disableWebUI": "是否禁用 WebUI - true 则只保留 API 功能",
+    "disableNonLANAccess": "是否禁止非局域网访问 - 安全选项"
+  },
+  "_env_override": {
+    "NAPCAT_WEBUI_HOST": "覆盖 host 配置",
+    "NAPCAT_WEBUI_PORT": "覆盖 port 配置",
+    "NAPCAT_WEBUI_TOKEN": "覆盖 token 配置",
+    "NAPCAT_QUICK_ACCOUNT": "覆盖 autoLoginAccount 配置"
+  },
+  "_security_tips": {
+    "production": "生产环境建议设置强 token (16+ 字符)",
+    "localhost_only": "如果只在本地使用，建议设置 host 为 127.0.0.1",
+    "firewall": "如果开放外部访问，请配置防火墙规则"
+  }
+}

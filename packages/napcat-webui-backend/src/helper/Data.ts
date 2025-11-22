@@ -8,6 +8,7 @@ const LoginRuntime: LoginRuntimeType = {
   LoginCurrentRate: 0,
   QQLoginStatus: false, // 已实现 但太傻了 得去那边注册个回调刷新
   QQQRCodeURL: '',
+  QQQRCodeTimestamp: 0,
   QQLoginUin: '',
   QQLoginInfo: {
     uid: '',
@@ -89,6 +90,14 @@ export const WebUiDataRuntime = {
 
   getQQLoginQrcodeURL (): LoginRuntimeType['QQQRCodeURL'] {
     return LoginRuntime.QQQRCodeURL;
+  },
+
+  setQQLoginQrcodeTimestamp (timestamp: number): void {
+    LoginRuntime.QQQRCodeTimestamp = timestamp;
+  },
+
+  getQQLoginQrcodeTimestamp (): number {
+    return LoginRuntime.QQQRCodeTimestamp;
   },
 
   setQQLoginInfo (info: LoginRuntimeType['QQLoginInfo']): void {

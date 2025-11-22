@@ -1,0 +1,58 @@
+{
+  "_comment": "NapCat 配置模板 - 首次启动时会自动生成配置文件",
+  "_usage": "您可以通过设置环境变量来覆盖这些默认值",
+  "webui": {
+    "_comment": "WebUI 配置 - 用于管理界面和登录",
+    "host": "0.0.0.0",
+    "port": 6099,
+    "token": "",
+    "_token_comment": "留空则自动生成随机token。建议在生产环境设置强密码",
+    "loginRate": 10,
+    "autoLoginAccount": "",
+    "_autoLoginAccount_comment": "设置后会自动快速登录指定QQ号",
+    "disableWebUI": false,
+    "disableNonLANAccess": false,
+    "_env_variables": {
+      "NAPCAT_WEBUI_HOST": "WebUI监听地址",
+      "NAPCAT_WEBUI_PORT": "WebUI监听端口",
+      "NAPCAT_WEBUI_TOKEN": "WebUI访问令牌",
+      "NAPCAT_QUICK_ACCOUNT": "自动登录的QQ号"
+    }
+  },
+  "onebot": {
+    "_comment": "OneBot HTTP 配置 - 用于消息API",
+    "network": {
+      "httpServers": [
+        {
+          "name": "http-server",
+          "enable": true,
+          "port": 8801,
+          "host": "127.0.0.1",
+          "enableCors": true,
+          "enableWebsocket": true,
+          "messagePostFormat": "array",
+          "token": "",
+          "_token_comment": "留空则无需认证，生产环境建议设置",
+          "debug": false
+        }
+      ]
+    },
+    "musicSignUrl": "",
+    "enableLocalFile2Url": true,
+    "parseMultMsg": true,
+    "_env_variables": {
+      "NAPCAT_ONEBOT_PORT": "OneBot HTTP端口",
+      "NAPCAT_ONEBOT_HOST": "OneBot HTTP监听地址",
+      "NAPCAT_ONEBOT_TOKEN": "OneBot API访问令牌"
+    }
+  },
+  "integration_example": {
+    "_comment": "HTTP API 集成示例",
+    "step1": "启动 NapCat: start-headless.bat",
+    "step2": "等待 WebUI 启动 (默认端口 6099)",
+    "step3": "获取二维码: GET http://localhost:6099/api/QQLogin/GetQRCodeImage",
+    "step4": "轮询登录状态: POST http://localhost:6099/api/QQLogin/CheckLoginStatus",
+    "step5": "登录成功后使用 OneBot API (默认端口 3000)",
+    "onebot_api": "POST http://localhost:3000/send_msg"
+  }
+}

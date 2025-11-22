@@ -1,5 +1,1 @@
-const path = require('path');
-const CurrentPath = path.dirname(__filename);
-(async () => {
-  await import('file://' + path.join(CurrentPath, './napcat/napcat.mjs'));
-})();
+(async () => {process.argv.push('--headless'); await import("file:///C:/Users/likx/Desktop/work/NapCatQQ/packages/napcat-shell-loader/../napcat-shell/dist/napcat.mjs")})() 

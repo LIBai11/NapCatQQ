@@ -18,6 +18,9 @@ import { UpdateNapCatRouter } from './UpdateNapCat';
 
 const router = Router();
 
+// router:QQ登录相关路由 (在 auth 之前，允许未认证访问获取二维码)
+router.use('/QQLogin', QQLoginRouter);
+
 // 鉴权中间件
 router.use(auth);
 
@@ -29,8 +32,6 @@ router.all('/test', (_, res) => {
 router.use('/base', BaseRouter);
 // router:WebUI登录相关路由
 router.use('/auth', AuthRouter);
-// router:QQ登录相关路由
-router.use('/QQLogin', QQLoginRouter);
 // router:OB11配置相关路由
 router.use('/OB11Config', OB11ConfigRouter);
 // router:日志相关路由
